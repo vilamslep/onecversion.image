@@ -1,0 +1,145 @@
+version: '3'                                                                                                                                                             
+
+networks:
+  databus:
+    driver: bridge
+    enable_ipv6: false
+    internal: true
+    ipam:
+     driver: default
+     config:
+       - subnet: 172.16.100.0/24
+  database:
+    driver: bridge
+    enable_ipv6: false
+    internal: true
+    ipam:
+     driver: default
+     config:
+       - subnet: 172.16.110.0/24
+  backend:
+    driver: bridge
+    enable_ipv6: false
+    internal: true
+    ipam:
+     driver: default
+     config:
+       - subnet: 172.16.120.0/24
+  frontend:
+    driver: bridge
+    enable_ipv6: false
+    internal: false
+    ipam:
+     driver: default
+     config:
+       - subnet: 172.16.130.0/24
+  tunel:
+    driver: bridge
+    enable_ipv6: false
+    internal: false
+    ipam:
+     driver: default
+     config:
+       - subnet: 172.16.140.0/24
+volumes:
+  pgdata:
+    external:
+      name: pgdata
+  kafkadata:
+    external:
+      name: kafkadata
+  zookeeperdata:
+    external:
+      name: zookeeperdata
+services:                                                                                                                                                                
+  db:
+    container_name: pgsql
+    build: postgresql/
+    restart: always
+    ports:
+      - 5432:5432
+    networks:
+      - database
+    environment:
+      - SERVICEUSER=onecversion
+      - SERVICEPASSWORD=onecversion
+    volumes:
+      - pgdata:/var/lib/postgresql/14/main
+  zookeeper:                                                                                                                                                             
+    container_name: zookeeper                                                                                                                                            
+    build: zookeeper/                                                                                                                                                    
+    restart: always
+    networks:
+      - databus
+    ports:                                                                                                                                                               
+      - 2185:2185                                                                                                                                                        
+    volumes:                                                                                                                                                             
+      - zookeeperdata:/tmp/zookeeper                                                                                                                                  
+  kafka:                                                                                                                                                                 
+    container_name: kafka                                                                                                                                                
+    build: kafka/  
+    restart: always                                                                                                                                                      
+    depends_on:                                                                                                                                                          
+      - zookeeper  
+    networks:
+      - databus
+    ports:                                                                                                                                                               
+      - 9092:9092                                                                                                                                                        
+    volumes:                                                                                                                                                             
+      - kafkadata:/tmp/kafka-logs
+  entrypoint:
+    container_name: entrypoint 
+    build: raw/
+    restart: always
+    env_file: 
+      - raw/env
+    depends_on:
+      - kafka
+    networks:
+      - databus
+      - backend
+  process:
+    container_name: process 
+    build: process/
+    restart: always
+    env_file: 
+      - process/env
+    depends_on:
+      - db
+      - kafka
+      - sshd
+    networks:
+      - database
+      - databus
+      - tunel
+  api:
+    container_name: api 
+    build: api/
+    restart: always
+    env_file: 
+      - api/env
+    depends_on:
+      - db
+    networks:
+      - database
+      - backend
+  proxy:
+    container_name: proxy
+    build: proxy/
+    restart: always
+    depends_on:
+      - entrypoint
+      - api
+    ports:
+      - 4567:4567
+    networks:
+      - backend
+      - frontend
+  sshd:
+    container_name: sshd
+    build: sshd/
+    restart: always
+    ports:
+      - '22222:22'
+    networks:
+      - tunel
